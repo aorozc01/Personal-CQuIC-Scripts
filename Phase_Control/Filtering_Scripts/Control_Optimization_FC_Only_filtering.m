@@ -1,0 +1,55 @@
+function [Avg_FC_Fidelity,FC_Fidelity,PWC_FC,T_PWC_FC,FC_dt,FC_phase,optimal_coeff,...
+    target_state,t_final,steps_FC,initial_state,psi_f_FC,Avg_wmax,wmax_FC] = ...
+    Control_Optimization_FC_Only_filtering(spin,beta,Omega,w0,NumAvgs,n)
+% Opimization of a piecewise constant and fourier contrained phase
+% function. This function also plots the functions and their power spectra.
+
+rng default % sets random generator to default to reproduce results
+
+%---set parameters
+%spin = 1;%input('Spin?\n');
+dim = 2*spin+1;
+t_final = n*2*pi; %one period of the fundamental frequency [T=(2pi)/w0], w0 = Omega = 1
+Avg_wmax = zeros(1,length(spin));
+Avg_FC_Fidelity = zeros(1,length(spin));
+wmax_FC = zeros(NumAvgs,length(spin));
+FC_Fidelity = zeros(NumAvgs,length(spin));
+for ii = 1:length(spin)
+initial_state = zeros(1,dim(ii))'; initial_state(1) = 1; % initial state is pointing in postive z-direction
+initial_coeff = rand(1,2*dim(ii)); % initial random Fourier Amplitude guess
+steps_FC  = n*100; %used in FC functions to determing dt size
+%---Parameters used to average results
+options = optimset(...  % these are the settings from unitary control search
+    'TolX',            1e-16,...    % related to minimum tolerance for change in x
+    'TolFun',          1e-8,...    % minumum tolerance for change in the function
+    'MaxIter',         2000,...   % maximum number of iterations
+    'DerivativeCheck', 'off',...    % compare analytic gradient to numerical estimation (off)
+    'GradObj',         'on',...         % tells matlab whether the gradient is supplied to fminunc
+    'LargeScale',       'off', ... % when turned off will increase calculation speed
+    'Display',         'off',...          % output type in matlab command window, USE 'iter' to turn on
+    'MaxFunEvals',     10^6,...         % maximum number of function calls'MaxFunEvals', 500);
+    'ObjectiveLimit',  -0.99999);    % once objective function reaches this value, fminunc ...
+m = 2;                                        %stops (ONLY works for quasi-Newton method)
+PB_FC = 1.2*dim(ii)+0.8;
+PB_FC_0 = PB_FC-2;
+PB_FC_f = PB_FC+2;
+for jj = 1:NumAvgs
+    target_state= randn_target_state(dim(ii)); % creates a normalized vector with random valued component
+    
+    %---Fourier Contrained Phase Optimization
+    F = @(coeff) FourierConstrainedPhase(coeff,initial_state,target_state,...
+        spin(ii),t_final,steps_FC,beta,Omega,w0);
+    optimal_coeff = fminunc(F,initial_coeff,options); % aopt changes every iteration  
+    [FC_Fidelity(jj,ii),~,FC_phase,FC_dt,psi_f_FC] = FourierConstrainedPhase...
+        (optimal_coeff,initial_state,...
+        target_state,spin(ii),t_final,steps_FC,1,1,1);   
+    
+    [PWC_FC,T_PWC_FC] = piecewise_repmat_leftmost_point(FC_phase,FC_dt,FC_dt/m);
+    
+    wmax_FC(jj,ii)= Filtering_Function_FC_In_Optim_Func(initial_state,...
+            target_state,PWC_FC,T_PWC_FC,t_final,spin(ii),PB_FC_0,PB_FC_f);
+end
+Avg_FC_Fidelity(ii) = sum(FC_Fidelity(:,ii))/NumAvgs; % avg fidelity stored for each spin
+Avg_wmax(ii) = (1/NumAvgs)*sum(wmax_FC(:,ii));
+end
+end
